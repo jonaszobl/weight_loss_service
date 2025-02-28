@@ -3,8 +3,10 @@ import json
 import os
 import datetime
 
-# Datei zur Speicherung der Daten
+# Dateien zur Speicherung der Daten
 DATA_FILE = "kalorien_data.json"
+STANDARD_FILE = "standard_plan.json"
+HISTORIE_FILE = "historie.json"
 PASSWORD = "jonas"
 
 # Wochentage auf Deutsch
@@ -21,38 +23,59 @@ wochentag_deutsch = {
     "Sunday": "Sonntag"
 }
 
-# Funktion zum Laden der Daten
+# Funktion zum Laden der Standardwerte
+def load_standard_data():
+    if os.path.exists(STANDARD_FILE):
+        with open(STANDARD_FILE, "r") as file:
+            return json.load(file)
+    else:
+        return {tag: {"Fruehstück": [], "Mittagessen": [], "Abendessen": [], "Zusatzkalorien": []} for tag in WOCHENTAGE}
+
+# Funktion zum Laden der aktuellen Wochen-Daten
 def load_data():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r") as file:
             data = json.load(file)
     else:
-        data = {tag: {"Frühstück": [], "Mittagessen": [], "Abendessen": [], "Zusatzkalorien": []} for tag in WOCHENTAGE}
+        data = load_standard_data()
 
-    # Sicherstellen, dass jeder Wochentag alle Kategorien hat
     for tag in WOCHENTAGE:
-        for category in ["Frühstück", "Mittagessen", "Abendessen", "Zusatzkalorien"]:
+        for category in ["Fruehstück", "Mittagessen", "Abendessen", "Zusatzkalorien"]:
             if category not in data[tag]:
                 data[tag][category] = []
-
+    
     return data
 
-# Funktion zum Speichern der Daten
+# Funktion zum Speichern der aktuellen Daten
 def save_data(data):
     with open(DATA_FILE, "w") as file:
         json.dump(data, file, indent=4)
 
+# Funktion zum Speichern der historischen Daten
+def save_to_history():
+    if os.path.exists(HISTORIE_FILE):
+        with open(HISTORIE_FILE, "r") as file:
+            history_data = json.load(file)
+    else:
+        history_data = []
+
+    today = datetime.datetime.today().strftime("%Y-%m-%d")  # Aktuelles Datum
+    history_data.append({"datum": today, "daten": kalorien_data})  # Speichert aktuelle Woche
+
+    with open(HISTORIE_FILE, "w") as file:
+        json.dump(history_data, file, indent=4)
+
 # Daten laden
 kalorien_data = load_data()
 
-st.header("Mama's Kalorien Wochenplaner")
+st.header("🍽️ Mama's Kalorien Wochenplaner")
 
 # Heutigen Wochentag setzen
 heute = datetime.datetime.today().strftime("%A")
 selected_day = st.selectbox("Wähle einen Wochentag:", WOCHENTAGE, index=WOCHENTAGE.index(wochentag_deutsch.get(heute, "Montag")))
 
 # Mahlzeiten-Typ auswählen
-meal_type = st.radio("Mahlzeit wählen:", ["Frühstück", "Mittagessen", "Abendessen", "Zusatzkalorien"])
+meal_type = st.radio("Mahlzeit wählen:", ["Fruehstück", "Mittagessen", "Abendessen", "Zusatzkalorien"])
 
 # Eingabe für Mahlzeit & Kalorien
 meal_name = st.text_input("Gericht oder Snack eingeben:")
@@ -81,7 +104,6 @@ for meal_type, meals in kalorien_data[selected_day].items():
                 kalorien_data[selected_day][meal_type][i]["gegessen"] = checked
                 save_data(kalorien_data)
 
-            # Nur gezählte Mahlzeiten zur Tagesbilanz addieren
             if checked:
                 total_calories += meal["kalorien"]
     else:
@@ -98,40 +120,53 @@ st.subheader("📊 Wochenübersicht")
 week_total = 0
 
 for tag in WOCHENTAGE:
-    day_total = 0
-    for meals in kalorien_data[tag].values():
-        if isinstance(meals, list):
-            day_total += sum(meal["kalorien"] for meal in meals if meal["gegessen"])
-    
+    day_total = sum(meal["kalorien"] for meals in kalorien_data[tag].values() for meal in meals if meal["gegessen"])
     week_total += day_total
     st.write(f"**{tag}: {day_total} kcal**")
 
-# Wochenziel-Check
 week_status_icon = "✅" if week_total < ziel_wochen_kcal else "❌"
 st.write(f"**🔢 Gesamtkalorien der Woche: {week_total} / {ziel_wochen_kcal} kcal {week_status_icon}**")
 
-# Einzelne Mahlzeit löschen (mit Passwort)
-st.subheader("❌ Einzelne Mahlzeit oder Zusatzkalorie löschen")
-meal_to_delete = st.selectbox("Wähle eine Mahlzeit zum Löschen:", [meal["name"] for meals in kalorien_data[selected_day].values() if isinstance(meals, list) for meal in meals])
-delete_password = st.text_input("Passwort eingeben:", type="password")
-
-if st.button("Mahlzeit löschen"):
-    if delete_password == PASSWORD:
-        for meal_type in ["Frühstück", "Mittagessen", "Abendessen", "Zusatzkalorien"]:
-            kalorien_data[selected_day][meal_type] = [meal for meal in kalorien_data[selected_day][meal_type] if meal["name"] != meal_to_delete]
-        save_data(kalorien_data)
-        st.success(f"Mahlzeit '{meal_to_delete}' gelöscht!")
-    else:
-        st.error("Falsches Passwort!")
-
-# Gesamten Plan zurücksetzen (mit Passwort)
-st.subheader("🔄 Gesamten Wochenplan zurücksetzen")
+# Wochenplan zurücksetzen & historisch speichern
+st.subheader("🔄 Wochenplan zurücksetzen (Automatischer Reset am Montag)")
 reset_password = st.text_input("Passwort eingeben für Reset:", type="password", key="reset")
 
 if st.button("🔴 Wochenplan zurücksetzen"):
     if reset_password == PASSWORD:
-        kalorien_data = {tag: {"Frühstück": [], "Mittagessen": [], "Abendessen": [], "Zusatzkalorien": []} for tag in WOCHENTAGE}
-        save_data(kalorien_data)
-        st.success("Alle Einträge wurden zurückgesetzt!")
+        save_to_history()  # Speichert aktuelle Woche
+        standard_data = load_standard_data()  # Lädt Standardplan
+        save_data(standard_data)  # Setzt Plan zurück
+        st.success("Der Wochenplan wurde gespeichert und auf den Standard zurückgesetzt!")
     else:
         st.error("Falsches Passwort!")
+
+# Historische Wochenübersicht
+st.subheader("📜 Historische Wochenübersicht")
+
+if os.path.exists(HISTORIE_FILE):
+    with open(HISTORIE_FILE, "r") as file:
+        history_data = json.load(file)
+else:
+    history_data = []
+
+if history_data:
+    for entry in reversed(history_data):  # Neueste zuerst anzeigen
+        st.write(f"📅 **Woche vom {entry['datum']}**")
+
+        total_kcal = 0  # Gesamtkalorien der Woche
+
+        # Durchlaufe alle Wochentage
+        for tag, meals in entry["daten"].items():
+            for category, meal_list in meals.items():
+                if isinstance(meal_list, list):  # Sicherstellen, dass es eine Liste ist
+                    for meal in meal_list:
+                        if isinstance(meal, dict) and "kalorien" in meal and "gegessen" in meal:
+                            if meal["gegessen"]:  # Nur wenn "gegessen": true
+                                total_kcal += meal["kalorien"]
+
+        st.write(f"🔢 Gesamtkalorien: {total_kcal} kcal")
+        st.write("---")
+else:
+    st.write("Noch keine historischen Daten gespeichert.")
+
+
